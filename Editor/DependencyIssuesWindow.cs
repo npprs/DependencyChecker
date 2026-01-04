@@ -1,246 +1,14 @@
 #nullable enable
-using System.IO;
-using UnityEditor;
-using UnityEngine;
 using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Linq;
-using Newtonsoft.Json;
-using VRC.SDKBase.Editor.BuildPipeline;
+using UnityEditor;
+using UnityEngine;
 
-public class NoppersDependencyChecker
-{
-    // This determines when your callback runs (lower = earlier)
-    private static bool DEBUG = false;
-    public int callbackOrder => -100;
-
-    public const string MANIFEST_PATH = "Packages/vpm-manifest.json";
-
-    public const string TEMPLATE_PATH = "Assets/NOPPERS/DependencyChecker/Templates/template.json";
-
-    private static void Log(string message)
-    {
-        if (DEBUG)
-        {
-            Debug.Log(message);
-        }
-    }
-
-    [System.Serializable]
-    public class ManifestData
-    {
-        public Dictionary<string, PackageInfo>? dependencies;
-    }
-
-    [System.Serializable]
-    public class PackageInfo
-    {
-        public string? version;
-    }
-
-    public class DependencyIssue
-    {
-        public string PackageName { get; set; }
-        public string ExpectedVersion { get; set; }
-        public string? ActualVersion { get; set; }  // null = missing package
-
-        public DependencyIssue(string packageName, string expectedVersion, string? actualVersion = null)
-        {
-            PackageName = packageName;
-            ExpectedVersion = expectedVersion;
-            ActualVersion = actualVersion;
-        }
-    }
-
-    [MenuItem("Tools/NOPPERS/DependencyChecker/Check Versions")]
-    public static void CheckVersions()
-    {
-        Log("DependencyChecker -> Clicked");
-        string? manifest = GetManifest(MANIFEST_PATH);
-        Log("DependencyChecker -> GetManifest -> manifest ->\n" + manifest);
-        string? template = GetManifest(TEMPLATE_PATH);
-        Log("DependencyChecker -> GetManifest -> template ->\n" + template);
-
-        if (manifest == null || template == null)
-        {
-            Log("DependencyChecker -> One or both manifest files could not be read.");
-            return;
-        }
-
-        var templateJSON = JsonConvert.DeserializeObject<ManifestData>(template);
-        var manifestJSON = JsonConvert.DeserializeObject<ManifestData>(manifest);
-
-        if (!ValidateManifestStructure(templateJSON))
-        {
-            Log("DependencyChecker -> Template JSON structure is invalid.");
-            return;
-        }
-
-        if (!ValidateManifestStructure(manifestJSON))
-        {
-            Log("DependencyChecker -> Manifest JSON structure is invalid.");
-            return;
-        }
-
-        var issues = CompareManifests(template, manifest);
-
-        if (issues != null && issues.Count > 0)
-        {
-            // DisplayIssuesPopup(issues);
-            DependencyIssuesWindow.ShowWindow(issues);
-        }
-        return;
-    }
-
-    [MenuItem("Tools/NOPPERS/DependencyChecker/Debug")]
-    public static void ToggleDebug()
-    {
-        DEBUG = !DEBUG;
-        Debug.Log($"Dependency Checker Debug Logging: {(DEBUG ? "Enabled" : "Disabled")}");
-    }
-
-    [MenuItem("Tools/NOPPERS/DependencyChecker/Debug", true)]
-    public static bool ToggleDebugValidate()
-    {
-        Menu.SetChecked("Tools/NOPPERS/DependencyChecker/Toggle Debug Logging", DEBUG);
-        return true;
-    }
-
-    [MenuItem("Tools/NOPPERS/DependencyChecker/Debug: VPM Resolve All")]
-    public static void ShowManifestData()
-    {
-        // Debug-only action
-        // Debug.Log("Manifest data...");
-        DependencyIssuesWindow.OpenPackageResolverAndResolve();
-    }
-
-    [MenuItem("Tools/NOPPERS/DependencyChecker/Debug: VPM Resolve All", true)]
-    public static bool ShowManifestDataValidate()
-    {
-        return DEBUG; // Only show if debug enabled
-    }
-
-    [MenuItem("Tools/NOPPERS/DependencyChecker/Debug: List All Open Windows")]
-    public static void ListOpenWindows()
-    {
-        var windows = Resources.FindObjectsOfTypeAll<EditorWindow>();
-        Debug.Log($"=== Found {windows.Length} open windows ===");
-        foreach (var window in windows)
-        {
-            Debug.Log($"Title: '{window.titleContent.text}' | Type: {window.GetType().FullName}");
-        }
-    }
-
-    [MenuItem("Tools/NOPPERS/DependencyChecker/Debug: List All Open Windows", true)]
-    public static bool ListOpenWindowsValidate()
-    {
-        return DEBUG;
-    }
-
-    [InitializeOnLoadMethod]
-    private static void CheckOnLoad()
-    {
-        Log("DependencyChecker -> CheckOnLoad");
-    }
-
-    public bool OnBuildRequested(VRCSDKRequestedBuildType requestedBuildType)
-    {
-        Log("DependencyChecker -> OnBuildRequested");
-        return true;
-    }
-
-    private static string? GetManifest(string path)
-    {
-        if (!File.Exists(path))
-        {
-            Log("DependencyChecker -> JSON file not found at path: " + path);
-            return null;
-        }
-
-        string manifestContent = File.ReadAllText(path);
-        return manifestContent;
-    }
-
-    private static bool ValidateManifestStructure(ManifestData? data)
-    {
-        if (data == null)
-        {
-            Log("DependencyChecker -> data is null");
-            return false;
-        }
-
-        if (data.dependencies == null)
-        {
-            Log("DependencyChecker -> dependencies field is null");
-            return false;
-        }
-
-        if (data.dependencies.Count == 0)
-        {
-            Log("DependencyChecker -> dependencies field is empty");
-            return false;
-        }
-
-        foreach (var dep in data.dependencies)
-        {
-            if (string.IsNullOrWhiteSpace(dep.Key))
-            {
-                Log("DependencyChecker -> dependency key is null or whitespace");
-                return false;
-            }
-
-            if (dep.Value == null || string.IsNullOrWhiteSpace(dep.Value.version))
-            {
-                Log($"DependencyChecker -> dependency '{dep.Key}' has null or whitespace version");
-                return false;
-            }
-        }
-
-        return true;
-    }
-
-    private static List<DependencyIssue>? CompareManifests(string templateJson, string manifestJson)
-    {
-        var template = JsonConvert.DeserializeObject<ManifestData>(templateJson);
-        var manifest = JsonConvert.DeserializeObject<ManifestData>(manifestJson);
-
-        if (template?.dependencies == null || manifest?.dependencies == null)
-        {
-            Log("DependencyChecker -> Missing dependencies field");
-            return null;
-        }
-
-        var issues = new List<DependencyIssue>();
-
-        foreach (var item in template.dependencies)
-        {
-            Log($"DependencyChecker -> Checking: {item.Key} : {item.Value.version}");
-
-            if (!manifest.dependencies.ContainsKey(item.Key))
-            {
-                Log($"Missing: {item.Key} (v{item.Value.version})");
-                issues.Add(new DependencyIssue(
-                    item.Key,
-                    item.Value!.version!
-                ));
-                continue;
-            }
-
-            if (manifest.dependencies[item.Key].version != item.Value.version)
-            {
-                Log($"Version mismatch {item.Key}: template={item.Value.version},manifest={manifest.dependencies[item.Key].version}");
-                issues.Add(new DependencyIssue(
-                    item.Key,
-                    item.Value!.version!,
-                    manifest.dependencies[item.Key].version!
-                ));
-            }
-        }
-
-        return issues;
-    }
-}
-
+/// <summary>
+/// UI window that displays dependency issues and provides options to fix them.
+/// </summary>
 public class DependencyIssuesWindow : EditorWindow
 {
     // Simplified size constants (base 2)
@@ -267,55 +35,65 @@ public class DependencyIssuesWindow : EditorWindow
     {
         try
         {
-            // Read current template
-            string? templateJson = File.ReadAllText(NoppersDependencyChecker.TEMPLATE_PATH);
-            var templateData = JsonConvert.DeserializeObject<NoppersDependencyChecker.ManifestData>(templateJson);
+            string locksDir = NoppersDependencyChecker.GetLocksDirectory();
+            string disabledDir = Path.Combine(Path.GetDirectoryName(locksDir)!, "Locks_Disabled").Replace("\\", "/");
 
-            if (templateData?.dependencies == null)
+            // Find all lock files
+            var lockFiles = Directory.GetFiles(locksDir, "*.lock.json");
+
+            if (lockFiles.Length == 0)
             {
-                Debug.LogError("Failed to read template data");
                 return;
             }
 
-            int updatedCount = 0;
-            int removedCount = 0;
-
-            // Update versions for mismatches and remove missing packages
-            foreach (var issue in _issues)
+            // Create disabled directory if it doesn't exist
+            if (!Directory.Exists(disabledDir))
             {
-                if (issue.ActualVersion == null)
+                Directory.CreateDirectory(disabledDir);
+            }
+
+            int movedCount = 0;
+            foreach (var lockFile in lockFiles)
+            {
+                string fileName = Path.GetFileName(lockFile);
+                string destPath = Path.Combine(disabledDir, fileName);
+
+                int assetsIndex = lockFile.IndexOf("Assets");
+                if (assetsIndex == -1) continue;
+
+                string assetPath = lockFile.Substring(assetsIndex).Replace("\\", "/");
+                string destAssetPath = destPath.Substring(destPath.IndexOf("Assets")).Replace("\\", "/");
+
+                // Delete existing file at destination if present
+                if (File.Exists(destPath))
                 {
-                    // Missing package - remove from template
-                    if (templateData.dependencies.Remove(issue.PackageName))
-                    {
-                        removedCount++;
-                        Debug.Log($"Removed requirement: {issue.PackageName}");
-                    }
+                    AssetDatabase.DeleteAsset(destAssetPath);
+                }
+
+                // Move the file using AssetDatabase to properly handle .meta files
+                string moveResult = AssetDatabase.MoveAsset(assetPath, destAssetPath);
+                if (string.IsNullOrEmpty(moveResult))
+                {
+                    movedCount++;
                 }
                 else
                 {
-                    // Version mismatch - update to current version
-                    if (templateData.dependencies.ContainsKey(issue.PackageName))
-                    {
-                        templateData.dependencies[issue.PackageName].version = issue.ActualVersion;
-                        updatedCount++;
-                        Debug.Log($"Updated {issue.PackageName}: {issue.ExpectedVersion} → {issue.ActualVersion}");
-                    }
+                    Debug.LogWarning($"Failed to move {assetPath}: {moveResult}");
                 }
             }
 
-            // Save updated template
-            string updatedJson = JsonConvert.SerializeObject(templateData, Formatting.Indented);
-            File.WriteAllText(NoppersDependencyChecker.TEMPLATE_PATH, updatedJson);
+            AssetDatabase.Refresh();
 
-            Debug.Log($"Template updated successfully: {updatedCount} version(s) updated, {removedCount} package(s) removed");
+            EditorUtility.DisplayDialog("Success",
+                $"Accepted current versions.\n\n{movedCount} lock file(s) moved to Locks_Disabled/\n\nYou can move them back manually if needed.",
+                "OK");
 
-            // Close window
             Close();
         }
         catch (Exception ex)
         {
-            Debug.LogError($"Failed to update template: {ex.Message}");
+            Debug.LogError($"Failed to accept current versions: {ex.Message}");
+            EditorUtility.DisplayDialog("Error", $"Failed to disable lock files:\n{ex.Message}", "OK");
         }
     }
 
@@ -329,10 +107,33 @@ public class DependencyIssuesWindow : EditorWindow
     {
         try
         {
-            // The "Resolve All" button calls Resolver.ResolveManifest (static method)
-            // Source: https://github.com/vrchat-community/examples-image-loading/blob/ac58660cc4b87e82297a495f01a80d34b1b4ce10/Packages/com.vrchat.core.vpm-resolver/Editor/Resolver/ResolverWindow.cs#L110
+            // Update manifest with required versions
+            string manifestPath = NoppersDependencyChecker.MANIFEST_PATH;
 
-            // Find the Resolver class
+            if (!NoppersDependencyChecker.UpdateManifest(
+                manifestPath,
+                _issues,
+                NoppersDependencyChecker.GetManifest,
+                (path, content) => {
+                    try
+                    {
+                        File.WriteAllText(path, content);
+                        AssetDatabase.Refresh();
+                        return true;
+                    }
+                    catch
+                    {
+                        return false;
+                    }
+                }
+            ))
+            {
+                Debug.LogError("Failed to update manifest with required versions.");
+                EditorUtility.DisplayDialog("Error", "Failed to update manifest. Check console for details.", "OK");
+                return;
+            }
+
+            // Trigger VPM Resolver
             var resolverType = Type.GetType("VRC.PackageManagement.Resolver.Resolver, VRC.SDK3A.Editor");
 
             if (resolverType == null)
@@ -348,7 +149,10 @@ public class DependencyIssuesWindow : EditorWindow
 
             if (resolverType == null)
             {
-                Debug.LogWarning("Could not find Resolver class. Please click 'Resolve All' manually.");
+                Debug.LogWarning("Could not find Resolver class. Manifest updated but you'll need to click 'Resolve All' manually.");
+                EditorUtility.DisplayDialog("Partial Success",
+                    "Manifest updated with required versions.\n\nPlease open VCC and click 'Resolve All' to install packages.",
+                    "OK");
                 return;
             }
 
@@ -360,16 +164,19 @@ public class DependencyIssuesWindow : EditorWindow
             {
                 // Call the static method (no instance needed)
                 resolveMethod.Invoke(null, null);
-                Debug.Log("✓ Successfully triggered Resolver.ResolveManifest");
             }
             else
             {
-                Debug.LogWarning("Could not find ResolveManifest method on Resolver class. Please click 'Resolve All' manually.");
+                Debug.LogWarning("Could not find ResolveManifest method on Resolver class. Manifest updated but you'll need to click 'Resolve All' manually.");
+                EditorUtility.DisplayDialog("Partial Success",
+                    "Manifest updated with required versions.\n\nPlease open VCC and click 'Resolve All' to install packages.",
+                    "OK");
             }
         }
         catch (Exception ex)
         {
             Debug.LogError($"Failed to trigger Resolve All: {ex.Message}\n{ex.StackTrace}");
+            EditorUtility.DisplayDialog("Error", $"Failed to run Fix All:\n{ex.Message}", "OK");
         }
     }
 
@@ -448,7 +255,7 @@ public class DependencyIssuesWindow : EditorWindow
 
                 var packageStyle = new GUIStyle(EditorStyles.label);
                 packageStyle.fontSize = 12;
-                EditorGUILayout.LabelField($"📦 {issue.PackageName}", packageStyle, GUILayout.Width(SIZE_256));
+                EditorGUILayout.LabelField($"{issue.PackageName}", packageStyle, GUILayout.Width(SIZE_256));
 
                 // Spacer to align with "Current: v..." in mismatches
                 EditorGUILayout.LabelField("", GUILayout.Width(SIZE_128));
@@ -482,7 +289,7 @@ public class DependencyIssuesWindow : EditorWindow
 
                 var packageStyle = new GUIStyle(EditorStyles.label);
                 packageStyle.fontSize = 12;
-                EditorGUILayout.LabelField($"📦 {issue.PackageName}", packageStyle, GUILayout.Width(SIZE_256));
+                EditorGUILayout.LabelField($"{issue.PackageName}", packageStyle, GUILayout.Width(SIZE_256));
 
                 var currentStyle = new GUIStyle(EditorStyles.label);
                 currentStyle.fontSize = 11;
@@ -538,16 +345,24 @@ public class DependencyIssuesWindow : EditorWindow
 
             EditorGUILayout.Space(SIZE_16);
 
-            // Accept Current button
+            // Buttons side by side
             EditorGUILayout.BeginHorizontal();
             GUILayout.FlexibleSpace();
 
-            GUI.backgroundColor = new Color(1f, 0.6f, 0.2f);
-            if (GUILayout.Button("🔧 Accept Current Versions", GUILayout.Height(SIZE_16 + SIZE_8)))
+            GUI.backgroundColor = new Color(1f, 0.8f, 0.2f);
+            if (GUILayout.Button("⚠️ Fix All (Experimental)", GUILayout.Height(SIZE_16 + SIZE_8), GUILayout.Width(SIZE_128 + SIZE_64)))
+            {
+                TriggerResolveAll();
+                Close();
+            }
+            GUI.backgroundColor = Color.white;
+
+            GUILayout.Space(SIZE_8);
+
+            if (GUILayout.Button("Accept Current Versions", GUILayout.Height(SIZE_16 + SIZE_8), GUILayout.Width(SIZE_128 + SIZE_64)))
             {
                 AcceptCurrentVersions();
             }
-            GUI.backgroundColor = Color.white;
 
             GUILayout.FlexibleSpace();
             EditorGUILayout.EndHorizontal();

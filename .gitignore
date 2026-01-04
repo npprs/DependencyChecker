@@ -1,3 +1,7 @@
 # Unity meta files
 *.meta
 .vscode/
+
+# Application Artifacts
+Locks_Disabled/
+Locks/
