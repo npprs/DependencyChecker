@@ -5,7 +5,7 @@ using System.IO;
 // Centralized lifecycle hook control for dependency checker
 public static class DependencyCheckerHooks
 {
-    public static bool Enabled = false;
+    public static bool Enabled = true;
 }
 
 [InitializeOnLoad]
